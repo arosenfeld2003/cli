@@ -1,0 +1,121 @@
+Implement the following plan:
+
+# Add `commit_tree_hash` to Checkpoint Metadata
+
+## Context
+
+When git history is rewritten (rebase, squash merge, force-push), the `Entire-Checkpoint` trailer linking user commits to metadata can be lost. To enable a future `entire repair` command that re-links commits to metadata after history rewrites, we need a content-addressable anchor stored in the metadata.
+
+**Git tree hashes** are ideal for this: a rebased commit has a different commit SHA but the **same tree hash** if the file content didn't change. By storing the tree hash at condensation time, a future repair command can scan the current branch for commits whose tree hash matches a checkpoint's stored tree hash and re-add the trailer.
+
+This PR adds only the metadata field — no read/repair logic yet. It's the smallest useful first step.
+
+## Changes
+
+### 1. Add `CommitTreeHash` field to three structs
+
+**File:** `cmd/entire/cli/checkpoint/checkpoint.go`
+
+- `WriteCommittedOptions` — add `CommitTreeHash string` after `Branch` (line 205)
+- `CommittedMetadata` — add `CommitTreeHash string` with JSON tag `commit_tree_hash,omitempty` after `Branch` (line 341)
+- `CheckpointSummary` — add `CommitTreeHash string` with JSON tag `commit_tree_hash,omitempty` after `Branch` (line 418)
+
+Using `string` (not `plumbing.Hash`) matches the `Branch` pattern and serializes cleanly to JSON hex.
+
+### 2. Pass through in `committed.go`
+
+**File:** `cmd/entire/cli/checkpoint/committed.go`
+
+- `writeSessionToSubdirectory()` (line 333): add `CommitTreeHash: opts.CommitTreeHash` to the `CommittedMetadata` literal
+- `writeCheckpointSummary()` (line 381): add `CommitTreeHash: opts.CommitTreeHash` to the `CheckpointSummary` literal
+
+### 3. Add `GetHeadTreeHash` helper
+
+**File:** `cmd/entire/cli/strategy/common.go`
+
+Add after `GetCurrentBranchName` (line 1469). Same pattern: get HEAD, extract property, return empty string on error.
+
+```go
+func GetHeadTreeHash(repo *git.Repository) string {
+	head, err := repo.Head()
+	if err != nil {
+		return ""
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return ""
+	}
+	return commit.TreeHash.String()
+}
+```
+
+### 4. Wire into manual-commit condensation
+
+**File:** `cmd/entire/cli/strategy/manual_commit_condensation.go`
+
+- After `branchName := GetCurrentBranchName(repo)` (line 141), add `commitTreeHash := GetHeadTreeHash(repo)`
+- Add `CommitTreeHash: commitTreeHash` to the `WriteCommittedOptions` literal (after line 181)
+
+### 5. Wire into auto-commit metadata
+
+**File:** `cmd/entire/cli/strategy/auto_commit.go`
+
+Two call sites:
+
+- `commitMetadataToMetadataBranch()` (line 247): add `commitTreeHash := GetHeadTreeHash(repo)` after `branchName`, add field to options (after line 257)
+- `commitTaskMetadataToMetadataBranch()` (line 647): add `commitTreeHash := GetHeadTreeHash(repo)` after `branchName`, add field to options (after line 654)
+
+### 6. Tests
+
+**File:** `cmd/entire/cli/checkpoint/checkpoint_test.go`
+
+Add `TestWriteCommitted_CommitTreeHashField` modeled on `TestWriteCommitted_BranchField` (line 495):
+- Subtest "present": write with tree hash from initial commit, verify in both `CommittedMetadata` and `CheckpointSummary`
+- Subtest "omitted when empty": write without tree hash, verify field is empty and omitted from JSON
+
+**File:** `cmd/entire/cli/strategy/manual_commit_test.go`
+
+Add `TestCondenseSession_IncludesCommitTreeHash` modeled on `TestCondenseSession_IncludesInitialAttribution` (line 1942):
+- Set up repo, create session, save changes, make user commit
+- Condense session, read metadata from `entire/checkpoints/v1`
+- Verify `commit_tree_hash` matches HEAD's tree hash in both session metadata and root summary
+
+## Files touched
+
+| File | Type of change |
+|------|---------------|
+| `cmd/entire/cli/checkpoint/checkpoint.go` | Add field to 3 structs |
+| `cmd/entire/cli/checkpoint/committed.go` | Pass field through in 2 functions |
+| `cmd/entire/cli/strategy/common.go` | Add `GetHeadTreeHash()` helper |
+| `cmd/entire/cli/strategy/manual_commit_condensation.go` | Call helper, pass to options |
+| `cmd/entire/cli/strategy/auto_commit.go` | Call helper, pass to options (2 sites) |
+| `cmd/entire/cli/checkpoint/checkpoint_test.go` | New round-trip test |
+| `cmd/entire/cli/strategy/manual_commit_test.go` | New condensation test |
+
+## What is NOT changed
+
+- No read paths, CLI commands, or display logic — field is write-only for now
+- No changes to temporary checkpoints (shadow branches)
+- No changes to trailers or `CommittedInfo` struct
+- No migration needed — `omitempty` means old checkpoints deserialize cleanly
+
+## Verification
+
+```bash
+mise run fmt && mise run lint && mise run test:ci
+```
+
+Specifically:
+- `go test ./cmd/entire/cli/checkpoint/ -run TestWriteCommitted_CommitTreeHashField -v`
+- `go test ./cmd/entire/cli/strategy/ -run TestCondenseSession_IncludesCommitTreeHash -v`
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/alexrosenfeld/.claude/projects/-Users-alexrosenfeld-repos-cli/95b83a7c-7537-4783-9daa-ac1444aa6c2b.jsonl
+
+---
+
+great - read the repository to investigate rules for contributing... should I create a PR on my fork?
+
+---
+
+yes

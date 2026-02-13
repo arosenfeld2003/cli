@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "62c55dec8ba9",
+  "strategy": "manual-commit",
+  "branch": "feature/add-commit-tree-hash-metadata",
+  "commit_tree_hash": "651dea0840f91268cc6d34af2abc68da13ad63eb",
+  "checkpoints_count": 1,
+  "files_touched": [
+    "cmd/entire/cli/checkpoint/checkpoint.go",
+    "cmd/entire/cli/checkpoint/checkpoint_test.go",
+    "cmd/entire/cli/checkpoint/committed.go",
+    "cmd/entire/cli/strategy/auto_commit.go",
+    "cmd/entire/cli/strategy/common.go",
+    "cmd/entire/cli/strategy/manual_commit_condensation.go",
+    "cmd/entire/cli/strategy/manual_commit_test.go"
+  ],
+  "sessions": [
+    {
+      "metadata": "/62/c55dec8ba9/0/metadata.json",
+      "transcript": "/62/c55dec8ba9/0/full.jsonl",
+      "context": "/62/c55dec8ba9/0/context.md",
+      "content_hash": "/62/c55dec8ba9/0/content_hash.txt",
+      "prompt": "/62/c55dec8ba9/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 46,
+    "cache_creation_tokens": 117920,
+    "cache_read_tokens": 4695691,
+    "output_tokens": 5260,
+    "api_call_count": 40
+  }
+}
