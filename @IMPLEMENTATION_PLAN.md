@@ -38,9 +38,24 @@ This is an established Go CLI project for Entire, a tool for managing developmen
 - [x] Verified all integration tests passing
 - [x] Ran code formatting with gofmt
 - [x] Verified code passes linting checks
+- [x] **ENT-221**: Implemented stale session warnings for ACTIVE/ACTIVE_COMMITTED sessions (2026-02-14)
+  - Added warnAboutStaleSessions() function in hooks.go
+  - Modified handleSessionStartCommon() to dispatch ActionWarnStaleSession
+  - Reuses staleness threshold from doctor.go (1 hour)
+  - Displays warning to stderr when stale sessions detected
+  - All tests passing after implementation
 
 ### Pending
-- [ ] No pending tasks - all tests passing and environment fully functional
+
+#### Low Priority Enhancements
+- [ ] Consider tracking binary files separately in attribution logic
+  - Location: cmd/entire/cli/strategy/manual_commit_attribution.go:72
+  - Add BinaryFilesChanged field for visibility into non-text file modifications
+
+#### Code Quality
+- [ ] **ENT-129**: Consolidate duplicate code between cli/git_operations.go and strategy/common.go
+  - Location: cmd/entire/cli/strategy/common.go:1507
+  - Duplicate GetBinaryFilesInCommit implementation
 
 ### Environment Issues Resolved
 - ✅ Go 1.25.6 installed successfully (ARM64 Linux)
