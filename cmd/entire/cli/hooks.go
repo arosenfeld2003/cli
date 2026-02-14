@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/entireio/cli/cmd/entire/cli/agent"
 	"github.com/entireio/cli/cmd/entire/cli/logging"
@@ -237,6 +238,53 @@ func logPostTaskHookContext(w io.Writer, input *PostTaskHookInput, subagentTrans
 	}
 }
 
+// warnAboutStaleSessions checks for stale active sessions and warns the user.
+func warnAboutStaleSessions(currentSessionID string) {
+	states, err := strategy.ListSessionStates()
+	if err != nil {
+		// Fail silently in hook context - warning is informational
+		return
+	}
+
+	now := time.Now()
+	var staleCount int
+	var staleSessions []string
+
+	for _, state := range states {
+		if state.SessionID == currentSessionID {
+			continue // Skip current session
+		}
+
+		if !state.Phase.IsActive() {
+			continue // Only warn about active sessions
+		}
+
+		// Use same staleness detection as doctor.go
+		isStale := state.LastInteractionTime == nil ||
+			now.Sub(*state.LastInteractionTime) > stalenessThreshold
+
+		if isStale {
+			staleCount++
+			var sessionInfo string
+			if state.LastInteractionTime != nil {
+				duration := now.Sub(*state.LastInteractionTime).Truncate(time.Minute)
+				sessionInfo = fmt.Sprintf("%s (inactive for %s)", state.SessionID, duration)
+			} else {
+				sessionInfo = state.SessionID + " (no interaction time recorded)"
+			}
+			staleSessions = append(staleSessions, sessionInfo)
+		}
+	}
+
+	if staleCount > 0 {
+		fmt.Fprintf(os.Stderr, "\n[entire] Warning: Found %d stale session(s) that may be stuck:\n", staleCount)
+		for _, info := range staleSessions {
+			fmt.Fprintf(os.Stderr, "  - %s\n", info)
+		}
+		fmt.Fprintf(os.Stderr, "  Use 'entire doctor' to review and fix stuck sessions.\n\n")
+	}
+}
+
 // handleSessionStartCommon is the shared implementation for session start hooks.
 // Used by both Claude Code and Gemini CLI handlers.
 func handleSessionStartCommon() error {
@@ -280,11 +328,23 @@ func handleSessionStartCommon() error {
 
 	// Fire EventSessionStart for the current session (if state exists).
 	// This handles ENDED → IDLE (re-entering a session).
-	// TODO(ENT-221): dispatch ActionWarnStaleSession for ACTIVE/ACTIVE_COMMITTED sessions.
 	if state, loadErr := strategy.LoadSessionState(input.SessionID); loadErr != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load session state on start: %v\n", loadErr)
 	} else if state != nil {
-		strategy.TransitionAndLog(state, session.EventSessionStart, session.TransitionContext{})
+		remaining := strategy.TransitionAndLog(state, session.EventSessionStart, session.TransitionContext{})
+
+		// Dispatch actions from the state machine
+		for _, action := range remaining {
+			switch action {
+			case session.ActionWarnStaleSession:
+				warnAboutStaleSessions(input.SessionID)
+			case session.ActionCondense, session.ActionCondenseIfFilesTouched,
+				session.ActionDiscardIfNoFiles, session.ActionMigrateShadowBranch,
+				session.ActionClearEndedAt, session.ActionUpdateLastInteraction:
+				// These actions are handled by the state machine itself
+			}
+		}
+
 		if saveErr := strategy.SaveSessionState(state); saveErr != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to update session state on start: %v\n", saveErr)
 		}
