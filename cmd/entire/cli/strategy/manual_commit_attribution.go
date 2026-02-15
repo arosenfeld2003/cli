@@ -68,9 +68,6 @@ func getAllChangedFilesBetweenTrees(tree1, tree2 *object.Tree) []string {
 // which only makes sense for text files.
 //
 // Uses go-git's IsBinary() which implements git's binary detection algorithm.
-//
-// TODO: Consider tracking binary file counts separately (e.g., BinaryFilesChanged field)
-// to provide visibility into non-text file modifications.
 func getFileContent(tree *object.Tree, path string) string {
 	if tree == nil {
 		return ""
@@ -93,6 +90,33 @@ func getFileContent(tree *object.Tree, path string) string {
 	}
 
 	return content
+}
+
+// checkIfBinary checks if a file in the tree is a binary file.
+// Returns: (exists bool, isBinary bool)
+// - exists: true if the file exists in the tree
+// - isBinary: true if the file exists and is detected as binary
+func checkIfBinary(tree *object.Tree, path string) (exists bool, isBinary bool) {
+	if tree == nil {
+		return false, false
+	}
+
+	file, err := tree.File(path)
+	if err != nil {
+		return false, false
+	}
+
+	// File exists
+	exists = true
+
+	// Check if it's binary
+	isBinary, err = file.IsBinary()
+	if err != nil {
+		// On error, assume it's not binary so we don't lose track of the file
+		return true, false
+	}
+
+	return exists, isBinary
 }
 
 // diffLines compares two strings and returns line-level diff stats.
@@ -173,6 +197,11 @@ func CalculateAttributionWithAccumulated(
 		return nil
 	}
 
+	// Initialize binary file counters
+	var binaryFilesAdded, binaryFilesRemoved int
+	binaryFilesInBase := make(map[string]bool)
+	binaryFilesInHead := make(map[string]bool)
+
 	// Sum accumulated user lines from prompt attributions
 	// Also aggregate per-file user additions for accurate modification tracking
 	var accumulatedUserAdded, accumulatedUserRemoved int
@@ -195,6 +224,24 @@ func CalculateAttributionWithAccumulated(
 	postCheckpointUserRemovedPerFile := make(map[string]int)
 
 	for _, filePath := range filesTouched {
+		// Check if file is binary in each tree
+		baseExists, baseIsBinary := checkIfBinary(baseTree, filePath)
+		shadowExists, shadowIsBinary := checkIfBinary(shadowTree, filePath)
+		headExists, headIsBinary := checkIfBinary(headTree, filePath)
+
+		// Track binary files for counting
+		if baseExists && baseIsBinary {
+			binaryFilesInBase[filePath] = true
+		}
+		if headExists && headIsBinary {
+			binaryFilesInHead[filePath] = true
+		}
+
+		// Skip binary files for line-based attribution
+		if (baseExists && baseIsBinary) || (shadowExists && shadowIsBinary) || (headExists && headIsBinary) {
+			continue
+		}
+
 		baseContent := getFileContent(baseTree, filePath)
 		shadowContent := getFileContent(shadowTree, filePath)
 		headContent := getFileContent(headTree, filePath)
@@ -221,6 +268,23 @@ func CalculateAttributionWithAccumulated(
 	for _, filePath := range nonAgentFiles {
 		if slices.Contains(filesTouched, filePath) {
 			continue // Skip agent-touched files
+		}
+
+		// Check if it's a binary file
+		baseExists, baseIsBinary := checkIfBinary(baseTree, filePath)
+		headExists, headIsBinary := checkIfBinary(headTree, filePath)
+
+		// Track binary files
+		if baseExists && baseIsBinary {
+			binaryFilesInBase[filePath] = true
+		}
+		if headExists && headIsBinary {
+			binaryFilesInHead[filePath] = true
+		}
+
+		// Skip binary files for line-based attribution
+		if (baseExists && baseIsBinary) || (headExists && headIsBinary) {
+			continue
 		}
 
 		baseContent := getFileContent(baseTree, filePath)
@@ -294,14 +358,42 @@ func CalculateAttributionWithAccumulated(
 		agentPercentage = float64(agentLinesInCommit) / float64(totalCommitted) * 100
 	}
 
+	// Calculate binary file statistics
+	for filePath := range binaryFilesInHead {
+		if !binaryFilesInBase[filePath] {
+			binaryFilesAdded++
+		}
+	}
+	for filePath := range binaryFilesInBase {
+		if !binaryFilesInHead[filePath] {
+			binaryFilesRemoved++
+		}
+	}
+	binaryFilesChanged := binaryFilesAdded + binaryFilesRemoved
+
+	// Count binary files that were modified (exist in both but potentially different)
+	for filePath := range binaryFilesInBase {
+		if binaryFilesInHead[filePath] {
+			// File exists in both trees, check if it's actually different
+			baseFile, _ := baseTree.File(filePath)
+			headFile, _ := headTree.File(filePath)
+			if baseFile != nil && headFile != nil && baseFile.Hash != headFile.Hash {
+				binaryFilesChanged++
+			}
+		}
+	}
+
 	return &checkpoint.InitialAttribution{
-		CalculatedAt:    time.Now().UTC(),
-		AgentLines:      agentLinesInCommit,
-		HumanAdded:      pureUserAdded,
-		HumanModified:   totalHumanModified, // Total modifications (for reporting)
-		HumanRemoved:    pureUserRemoved,
-		TotalCommitted:  totalCommitted,
-		AgentPercentage: agentPercentage,
+		CalculatedAt:       time.Now().UTC(),
+		AgentLines:         agentLinesInCommit,
+		HumanAdded:         pureUserAdded,
+		HumanModified:      totalHumanModified, // Total modifications (for reporting)
+		HumanRemoved:       pureUserRemoved,
+		TotalCommitted:     totalCommitted,
+		AgentPercentage:    agentPercentage,
+		BinaryFilesChanged: binaryFilesChanged,
+		BinaryFilesAdded:   binaryFilesAdded,
+		BinaryFilesRemoved: binaryFilesRemoved,
 	}
 }
 

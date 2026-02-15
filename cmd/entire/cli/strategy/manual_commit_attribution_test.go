@@ -1149,3 +1149,118 @@ func TestCalculatePromptAttribution_PopulatesPerFile(t *testing.T) {
 		t.Errorf("UserAddedPerFile[b.go] = %d, want 1", result.UserAddedPerFile["b.go"])
 	}
 }
+
+// TestBinaryFileTracking tests that binary files are correctly tracked and excluded from line-based attribution
+func TestBinaryFileTracking(t *testing.T) {
+	t.Parallel()
+
+	// Create binary content with null bytes (detected as binary by git)
+	binaryContent := "binary\x00data"
+	textContent := "line1\nline2\nline3\n"
+
+	// Base tree: 1 text file, 1 binary file
+	baseTree := buildTestTree(t, map[string]string{
+		"text.go":   textContent,
+		"image.png": binaryContent,
+	})
+
+	// Shadow tree: agent adds text, modifies binary, adds new binary
+	shadowTree := buildTestTree(t, map[string]string{
+		"text.go":     textContent + "agent line\n",
+		"image.png":   binaryContent + "\x00modified",
+		"new_bin.dat": "\x00\x01\x02binary",
+	})
+
+	// Head tree: user removes one binary, adds another, modifies text
+	headTree := buildTestTree(t, map[string]string{
+		"text.go":      textContent + "agent line\nuser line\n",
+		"new_bin.dat":  "\x00\x01\x02binary",
+		"user_img.jpg": "jpeg\x00data",
+	})
+
+	filesTouched := []string{"text.go", "image.png", "new_bin.dat"}
+
+	result := CalculateAttributionWithAccumulated(
+		baseTree, shadowTree, headTree, filesTouched, []PromptAttribution{},
+	)
+
+	// Verify attribution calculated (not nil)
+	if result == nil {
+		t.Fatal("expected non-nil attribution")
+	}
+
+	// Check binary file statistics
+	// Binary files: image.png (removed), new_bin.dat (added), user_img.jpg (added)
+	// Changed = added + removed + modified
+	if result.BinaryFilesAdded != 2 {
+		t.Errorf("BinaryFilesAdded = %d, want 2 (new_bin.dat, user_img.jpg)", result.BinaryFilesAdded)
+	}
+	if result.BinaryFilesRemoved != 1 {
+		t.Errorf("BinaryFilesRemoved = %d, want 1 (image.png)", result.BinaryFilesRemoved)
+	}
+	if result.BinaryFilesChanged != 3 {
+		t.Errorf("BinaryFilesChanged = %d, want 3 (2 added + 1 removed)", result.BinaryFilesChanged)
+	}
+
+	// Verify text file attribution still works (binary files excluded from line counts)
+	if result.AgentLines != 1 {
+		t.Errorf("AgentLines = %d, want 1 (agent added 1 line to text.go)", result.AgentLines)
+	}
+	if result.HumanAdded != 1 {
+		t.Errorf("HumanAdded = %d, want 1 (user added 1 line to text.go)", result.HumanAdded)
+	}
+}
+
+// TestBinaryFileTracking_OnlyBinaryFiles tests attribution when all files are binary
+func TestBinaryFileTracking_OnlyBinaryFiles(t *testing.T) {
+	t.Parallel()
+
+	binaryContent1 := "\x00binary1"
+	binaryContent2 := "\x00binary2"
+
+	baseTree := buildTestTree(t, map[string]string{
+		"file1.bin": binaryContent1,
+	})
+
+	shadowTree := buildTestTree(t, map[string]string{
+		"file1.bin": binaryContent1,
+		"file2.bin": binaryContent2,
+	})
+
+	headTree := buildTestTree(t, map[string]string{
+		"file2.bin": binaryContent2,
+		"file3.bin": "\x00binary3",
+	})
+
+	filesTouched := []string{"file1.bin", "file2.bin"}
+
+	result := CalculateAttributionWithAccumulated(
+		baseTree, shadowTree, headTree, filesTouched, []PromptAttribution{},
+	)
+
+	if result == nil {
+		t.Fatal("expected non-nil attribution even with only binary files")
+	}
+
+	// Binary file counts: file1.bin removed, file2.bin exists in both, file3.bin added
+	if result.BinaryFilesAdded != 2 {
+		t.Errorf("BinaryFilesAdded = %d, want 2 (file2.bin, file3.bin)", result.BinaryFilesAdded)
+	}
+	if result.BinaryFilesRemoved != 1 {
+		t.Errorf("BinaryFilesRemoved = %d, want 1 (file1.bin)", result.BinaryFilesRemoved)
+	}
+
+	// No text files, so line-based attribution should be zero
+	if result.AgentLines != 0 {
+		t.Errorf("AgentLines = %d, want 0 (no text files)", result.AgentLines)
+	}
+	if result.HumanAdded != 0 {
+		t.Errorf("HumanAdded = %d, want 0 (no text files)", result.HumanAdded)
+	}
+	if result.TotalCommitted != 0 {
+		t.Errorf("TotalCommitted = %d, want 0 (no text files)", result.TotalCommitted)
+	}
+	if result.AgentPercentage != 0 {
+		t.Errorf("AgentPercentage = %.1f%%, want 0%% (no text files)", result.AgentPercentage)
+	}
+}

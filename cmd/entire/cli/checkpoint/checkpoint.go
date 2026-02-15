@@ -474,6 +474,12 @@ type InitialAttribution struct {
 	HumanRemoved    int       `json:"human_removed"`    // Lines removed by human (excluding modifications)
 	TotalCommitted  int       `json:"total_committed"`  // Net additions in commit (agent + human new lines, not total file size)
 	AgentPercentage float64   `json:"agent_percentage"` // agent_lines / total_committed * 100 (0 for deletion-only commits)
+
+	// Binary file tracking - provides visibility into non-text file modifications
+	// These files are excluded from line-based attribution but still tracked for completeness
+	BinaryFilesChanged int `json:"binary_files_changed,omitempty"` // Total binary files modified (added + removed + modified)
+	BinaryFilesAdded   int `json:"binary_files_added,omitempty"`   // Binary files added in this commit
+	BinaryFilesRemoved int `json:"binary_files_removed,omitempty"` // Binary files removed in this commit
 }
 
 // Info provides summary information for listing checkpoints.
