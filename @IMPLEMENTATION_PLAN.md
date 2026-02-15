@@ -51,13 +51,17 @@ This is an established Go CLI project for Entire, a tool for managing developmen
   - Fixed resume.go to use strategy.GetDefaultBranchName instead of removed function
   - Removed NOTE comments about duplication from strategy/common.go
   - All tests passing after consolidation
+- [x] **Binary File Tracking Enhancement**: Track binary files separately in attribution logic (2026-02-15)
+  - Added BinaryFilesChanged, BinaryFilesAdded, BinaryFilesRemoved fields to InitialAttribution struct
+  - Created checkIfBinary helper function to detect binary files using go-git's IsBinary()
+  - Updated CalculateAttributionWithAccumulated to track and count binary files
+  - Binary files are now excluded from line-based attribution but still tracked for visibility
+  - Added comprehensive tests TestBinaryFileTracking and TestBinaryFileTracking_OnlyBinaryFiles
+  - All tests passing, code formatted and linted
 
 ### Pending
 
-#### Low Priority Enhancements
-- [ ] Consider tracking binary files separately in attribution logic
-  - Location: cmd/entire/cli/strategy/manual_commit_attribution.go:72
-  - Add BinaryFilesChanged field for visibility into non-text file modifications
+(None - all tasks completed)
 
 ### Environment Issues Resolved
 - ✅ Go 1.25.6 installed successfully (ARM64 Linux)
