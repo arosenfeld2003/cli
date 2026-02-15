@@ -375,8 +375,14 @@ func CalculateAttributionWithAccumulated(
 	for filePath := range binaryFilesInBase {
 		if binaryFilesInHead[filePath] {
 			// File exists in both trees, check if it's actually different
-			baseFile, _ := baseTree.File(filePath)
-			headFile, _ := headTree.File(filePath)
+			baseFile, err := baseTree.File(filePath)
+			if err != nil {
+				continue
+			}
+			headFile, err := headTree.File(filePath)
+			if err != nil {
+				continue
+			}
 			if baseFile != nil && headFile != nil && baseFile.Hash != headFile.Hash {
 				binaryFilesChanged++
 			}
