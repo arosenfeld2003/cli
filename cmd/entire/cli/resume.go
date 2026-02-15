@@ -207,17 +207,8 @@ func findBranchCheckpoint(repo *git.Repository, branchName string) (*branchCheck
 	}
 
 	// HEAD doesn't have a checkpoint - find branch-only commits
-	// Get the default branch name
-	defaultBranch := getDefaultBranchFromRemote(repo)
-	if defaultBranch == "" {
-		// Fallback: try common names
-		for _, name := range []string{"main", "master"} {
-			if _, err := repo.Reference(plumbing.NewBranchReferenceName(name), true); err == nil {
-				defaultBranch = name
-				break
-			}
-		}
-	}
+	// Get the default branch name using strategy package function (ENT-129)
+	defaultBranch := strategy.GetDefaultBranchName(repo)
 
 	// If we can't find a default branch, or we're on it, just walk all commits
 	if defaultBranch == "" || defaultBranch == branchName {

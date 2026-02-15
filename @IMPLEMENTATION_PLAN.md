@@ -53,9 +53,12 @@ This is an established Go CLI project for Entire, a tool for managing developmen
   - Add BinaryFilesChanged field for visibility into non-text file modifications
 
 #### Code Quality
-- [ ] **ENT-129**: Consolidate duplicate code between cli/git_operations.go and strategy/common.go
-  - Location: cmd/entire/cli/strategy/common.go:1507
-  - Duplicate GetBinaryFilesInCommit implementation
+- [x] **ENT-129**: Consolidate duplicate code between cli/git_operations.go and strategy/common.go (2026-02-15)
+  - Refactored cli/git_operations.go to use strategy package functions
+  - Removed duplicate getDefaultBranchFromRemote function
+  - Updated IsOnDefaultBranch to delegate to strategy.IsOnDefaultBranch
+  - Fixed resume.go to use strategy.GetDefaultBranchName instead of removed function
+  - All tests passing after consolidation
 
 ### Environment Issues Resolved
 - ✅ Go 1.25.6 installed successfully (ARM64 Linux)
