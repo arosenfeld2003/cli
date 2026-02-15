@@ -80,62 +80,16 @@ func getGitConfigValue(key string) string {
 // 1. Checking the remote origin's HEAD reference
 // 2. Falling back to common names (main, master) if remote HEAD is unavailable
 // Returns (isDefault, branchName, error)
+// Uses the strategy package's implementation to avoid duplication (ENT-129).
 func IsOnDefaultBranch() (bool, string, error) {
 	repo, err := openRepository()
 	if err != nil {
 		return false, "", fmt.Errorf("failed to open git repository: %w", err)
 	}
 
-	// Get current branch
-	head, err := repo.Head()
-	if err != nil {
-		return false, "", fmt.Errorf("failed to get HEAD: %w", err)
-	}
-
-	if !head.Name().IsBranch() {
-		// Detached HEAD - not on any branch
-		return false, "", nil
-	}
-
-	currentBranch := head.Name().Short()
-
-	// Try to get default branch from remote origin's HEAD
-	defaultBranch := getDefaultBranchFromRemote(repo)
-
-	// If we couldn't determine from remote, use common defaults
-	if defaultBranch == "" {
-		// Check if current branch is a common default name
-		if currentBranch == "main" || currentBranch == "master" {
-			return true, currentBranch, nil
-		}
-		return false, currentBranch, nil
-	}
-
-	return currentBranch == defaultBranch, currentBranch, nil
-}
-
-// getDefaultBranchFromRemote tries to determine the default branch from the origin remote.
-// Returns empty string if unable to determine.
-func getDefaultBranchFromRemote(repo *git.Repository) string {
-	// Try to get the symbolic reference for origin/HEAD
-	ref, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", "HEAD"), true)
-	if err == nil && ref != nil {
-		// ref.Target() gives us something like "refs/remotes/origin/main"
-		target := ref.Target().String()
-		if strings.HasPrefix(target, "refs/remotes/origin/") {
-			return strings.TrimPrefix(target, "refs/remotes/origin/")
-		}
-	}
-
-	// Fallback: check if origin/main or origin/master exists
-	if _, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", "main"), true); err == nil {
-		return "main"
-	}
-	if _, err := repo.Reference(plumbing.NewRemoteReferenceName("origin", "master"), true); err == nil {
-		return "master"
-	}
-
-	return ""
+	// Delegate to strategy package function for the actual logic
+	isDefault, branchName := strategy.IsOnDefaultBranch(repo)
+	return isDefault, branchName, nil
 }
 
 // ShouldSkipOnDefaultBranch checks if we're on the default branch.

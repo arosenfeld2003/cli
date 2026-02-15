@@ -1504,7 +1504,6 @@ func GetMainBranchHash(repo *git.Repository) plumbing.Hash {
 // GetDefaultBranchName returns the name of the default branch.
 // First checks origin/HEAD, then falls back to checking if main/master exists.
 // Returns empty string if unable to determine.
-// NOTE: Duplicated from cli/git_operations.go - see ENT-129 for consolidation.
 func GetDefaultBranchName(repo *git.Repository) string {
 	// Try to get the symbolic reference for origin/HEAD
 	// Use resolved=false to get the symbolic ref itself, then extract its target
@@ -1537,7 +1536,6 @@ func GetDefaultBranchName(repo *git.Repository) string {
 
 // IsOnDefaultBranch checks if the repository HEAD is on the default branch.
 // Returns (isOnDefault, currentBranchName).
-// NOTE: Duplicated from cli/git_operations.go - see ENT-129 for consolidation.
 func IsOnDefaultBranch(repo *git.Repository) (bool, string) {
 	currentBranch := GetCurrentBranchName(repo)
 	if currentBranch == "" {
