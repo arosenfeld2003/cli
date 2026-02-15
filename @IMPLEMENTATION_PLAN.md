@@ -44,6 +44,13 @@ This is an established Go CLI project for Entire, a tool for managing developmen
   - Reuses staleness threshold from doctor.go (1 hour)
   - Displays warning to stderr when stale sessions detected
   - All tests passing after implementation
+- [x] **ENT-129**: Consolidate duplicate code between cli/git_operations.go and strategy/common.go (2026-02-15)
+  - Refactored cli/git_operations.go to use strategy package functions
+  - Removed duplicate getDefaultBranchFromRemote function
+  - Updated IsOnDefaultBranch to delegate to strategy.IsOnDefaultBranch
+  - Fixed resume.go to use strategy.GetDefaultBranchName instead of removed function
+  - Removed NOTE comments about duplication from strategy/common.go
+  - All tests passing after consolidation
 
 ### Pending
 
@@ -51,14 +58,6 @@ This is an established Go CLI project for Entire, a tool for managing developmen
 - [ ] Consider tracking binary files separately in attribution logic
   - Location: cmd/entire/cli/strategy/manual_commit_attribution.go:72
   - Add BinaryFilesChanged field for visibility into non-text file modifications
-
-#### Code Quality
-- [x] **ENT-129**: Consolidate duplicate code between cli/git_operations.go and strategy/common.go (2026-02-15)
-  - Refactored cli/git_operations.go to use strategy package functions
-  - Removed duplicate getDefaultBranchFromRemote function
-  - Updated IsOnDefaultBranch to delegate to strategy.IsOnDefaultBranch
-  - Fixed resume.go to use strategy.GetDefaultBranchName instead of removed function
-  - All tests passing after consolidation
 
 ### Environment Issues Resolved
 - ✅ Go 1.25.6 installed successfully (ARM64 Linux)
