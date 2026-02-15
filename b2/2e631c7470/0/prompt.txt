@@ -1,0 +1,271 @@
+Implement the following plan:
+
+# Add `commit_tree_hash` to Checkpoint Metadata
+
+## Context
+
+When git history is rewritten (rebase, squash merge, force-push), the `Entire-Checkpoint` trailer linking user commits to metadata can be lost. To enable a future `entire repair` command that re-links commits to metadata after history rewrites, we need a content-addressable anchor stored in the metadata.
+
+**Git tree hashes** are ideal for this: a rebased commit has a different commit SHA but the **same tree hash** if the file content didn't change. By storing the tree hash at condensation time, a future repair command can scan the current branch for commits whose tree hash matches a checkpoint's stored tree hash and re-add the trailer.
+
+This PR adds only the metadata field — no read/repair logic yet. It's the smallest useful first step.
+
+## Changes
+
+### 1. Add `CommitTreeHash` field to three structs
+
+**File:** `cmd/entire/cli/checkpoint/checkpoint.go`
+
+- `WriteCommittedOptions` — add `CommitTreeHash string` after `Branch` (line 205)
+- `CommittedMetadata` — add `CommitTreeHash string` with JSON tag `commit_tree_hash,omitempty` after `Branch` (line 341)
+- `CheckpointSummary` — add `CommitTreeHash string` with JSON tag `commit_tree_hash,omitempty` after `Branch` (line 418)
+
+Using `string` (not `plumbing.Hash`) matches the `Branch` pattern and serializes cleanly to JSON hex.
+
+### 2. Pass through in `committed.go`
+
+**File:** `cmd/entire/cli/checkpoint/committed.go`
+
+- `writeSessionToSubdirectory()` (line 333): add `CommitTreeHash: opts.CommitTreeHash` to the `CommittedMetadata` literal
+- `writeCheckpointSummary()` (line 381): add `CommitTreeHash: opts.CommitTreeHash` to the `CheckpointSummary` literal
+
+### 3. Add `GetHeadTreeHash` helper
+
+**File:** `cmd/entire/cli/strategy/common.go`
+
+Add after `GetCurrentBranchName` (line 1469). Same pattern: get HEAD, extract property, return empty string on error.
+
+```go
+func GetHeadTreeHash(repo *git.Repository) string {
+	head, err := repo.Head()
+	if err != nil {
+		return ""
+	}
+	commit, err := repo.CommitObject(head.Hash())
+	if err != nil {
+		return ""
+	}
+	return commit.TreeHash.String()
+}
+```
+
+### 4. Wire into manual-commit condensation
+
+**File:** `cmd/entire/cli/strategy/manual_commit_condensation.go`
+
+- After `branchName := GetCurrentBranchName(repo)` (line 141), add `commitTreeHash := GetHeadTreeHash(repo)`
+- Add `CommitTreeHash: commitTreeHash` to the `WriteCommittedOptions` literal (after line 181)
+
+### 5. Wire into auto-commit metadata
+
+**File:** `cmd/entire/cli/strategy/auto_commit.go`
+
+Two call sites:
+
+- `commitMetadataToMetadataBranch()` (line 247): add `commitTreeHash := GetHeadTreeHash(repo)` after `branchName`, add field to options (after line 257)
+- `commitTaskMetadataToMetadataBranch()` (line 647): add `commitTreeHash := GetHeadTreeHash(repo)` after `branchName`, add field to options (after line 654)
+
+### 6. Tests
+
+**File:** `cmd/entire/cli/checkpoint/checkpoint_test.go`
+
+Add `TestWriteCommitted_CommitTreeHashField` modeled on `TestWriteCommitted_BranchField` (line 495):
+- Subtest "present": write with tree hash from initial commit, verify in both `CommittedMetadata` and `CheckpointSummary`
+- Subtest "omitted when empty": write without tree hash, verify field is empty and omitted from JSON
+
+**File:** `cmd/entire/cli/strategy/manual_commit_test.go`
+
+Add `TestCondenseSession_IncludesCommitTreeHash` modeled on `TestCondenseSession_IncludesInitialAttribution` (line 1942):
+- Set up repo, create session, save changes, make user commit
+- Condense session, read metadata from `entire/checkpoints/v1`
+- Verify `commit_tree_hash` matches HEAD's tree hash in both session metadata and root summary
+
+## Files touched
+
+| File | Type of change |
+|------|---------------|
+| `cmd/entire/cli/checkpoint/checkpoint.go` | Add field to 3 structs |
+| `cmd/entire/cli/checkpoint/committed.go` | Pass field through in 2 functions |
+| `cmd/entire/cli/strategy/common.go` | Add `GetHeadTreeHash()` helper |
+| `cmd/entire/cli/strategy/manual_commit_condensation.go` | Call helper, pass to options |
+| `cmd/entire/cli/strategy/auto_commit.go` | Call helper, pass to options (2 sites) |
+| `cmd/entire/cli/checkpoint/checkpoint_test.go` | New round-trip test |
+| `cmd/entire/cli/strategy/manual_commit_test.go` | New condensation test |
+
+## What is NOT changed
+
+- No read paths, CLI commands, or display logic — field is write-only for now
+- No changes to temporary checkpoints (shadow branches)
+- No changes to trailers or `CommittedInfo` struct
+- No migration needed — `omitempty` means old checkpoints deserialize cleanly
+
+## Verification
+
+```bash
+mise run fmt && mise run lint && mise run test:ci
+```
+
+Specifically:
+- `go test ./cmd/entire/cli/checkpoint/ -run TestWriteCommitted_CommitTreeHashField -v`
+- `go test ./cmd/entire/cli/strategy/ -run TestCondenseSession_IncludesCommitTreeHash -v`
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/alexrosenfeld/.claude/projects/-Users-alexrosenfeld-repos-cli/95b83a7c-7537-4783-9daa-ac1444aa6c2b.jsonl
+
+---
+
+great - read the repository to investigate rules for contributing... should I create a PR on my fork?
+
+---
+
+yes
+
+---
+
+I don't have any Entire sessions - we should create them for this PR
+
+---
+
+review the test with me so I can understand the exact nature of the change and we can ensure that it isn't just a flaky pass
+
+---
+
+I merged one PR... I see changes in entire/checkpoints/v1 but can't create a PR because main and entire/checkpoints/v1 are entirely different commit histories.
+
+---
+
+I'm nervous about the PR... I want to make sure it's ready and compare to other existing PRs in the upstream to ensure it's still necessary
+
+---
+
+what about this one: 23 OPEN    Implement postmerge status target SHA for merge/squash/rebase strategies
+
+---
+
+great - let's create the PR
+
+---
+
+give me a very brief (1 sentence) comment about this PR I can put into Discord related to the original bug report
+
+---
+
+should I link it to an issue? https://github.com/entireio/cli/issues
+
+---
+
+yes let's create an issue
+
+---
+
+Yes make a very brief (1 sentence) note of this on the issue
+
+---
+
+Create a blog post about the current session and open a PR to publish it.
+
+Please follow this workflow:
+
+## 1. Gather Session Context
+- Get current working directory and repository name
+- Run `git log --since="today" --oneline` to see today's commits
+- Run `git diff HEAD~5..HEAD` to see recent changes (if commits exist)
+- Summarize what we worked on in this session
+
+## 2. Write Complete Blog Post FIRST (Before Getting User Input)
+**CRITICAL:** Write the entire blog post including your perspective section BEFORE asking for Alex's reflections. This ensures your observations are independent and not influenced by his input.
+
+- Analyze the technical work based on git history and code
+- Write the Technical Details section with code snippets and analysis
+- Write Claude's Perspective section with your independent observations
+- Create a placeholder for Alex's reflections at the beginning
+
+## 3. Create Blog Post Draft
+- Navigate to `/Users/alexrosenfeld/repos/arosenfeld2003.github.io`
+- Checkout master and pull latest changes: `git checkout master && git pull origin master`
+- Create a new branch: `blog-post-$(date +%Y-%m-%d)`
+  - If a branch with this name already exists, either switch to it or create a unique variant (e.g., add `-v2` suffix)
+- Generate filename: `content/blog/$(date +%Y-%m-%d)-[descriptive-slug].md`
+- Use this frontmatter template:
+  ```yaml
+  ---
+  title: "[Descriptive title about the work]"
+  date: $(date +%Y-%m-%d)T09:00:00-08:00
+  draft: true
+  tags: ["relevant", "tags", "here"]
+  category: "technical"
+  summary: "Brief summary of what was accomplished in this session"
+  ---
+  ```
+
+**Important:** Set the time to 9:00 AM Pacific to avoid future date issues. Hugo won't publish posts with future timestamps, even if `draft: true` is removed. Using a time earlier in the day ensures the post can be published immediately when ready.
+
+## 4. Get User Reflections (After Writing Complete Post)
+- Use the AskUserQuestion tool to prompt Alex for his personal reflections on the session
+- Ask: "What are your reflections on this work session? (This will go in the opening section of the blog post)"
+- If Alex provides reflections, insert them at the beginning of the post (replacing the placeholder)
+- If Alex prefers to write them later, keep the placeholder with guidance
+
+## 5. Post Content Structure
+The blog post should have these sections:
+
+### Opening Personal Narrative
+Start directly with Alex's reflections (no heading). This should flow naturally from the frontmatter. If writing before getting Alex's input, use a placeholder like:
+
+```
+[Placeholder for Alex's reflections - please add your personal thoughts about this work session, what motivated it, challenges faced, or lessons learned before publishing]
+```
+
+### Technical Details
+Include git commits, code snippets, key technical decisions, debugging steps, tech stack information, and repository links. Use subsections (###) to organize different technical aspects.
+
+**IMPORTANT:** Only describe what you can observe from git history, code changes, and terminal output. Do not fabricate details about the development process, decision-making, or user actions.
+
+### Claude's Perspective
+**Important:** Share YOUR thoughts about this session:
+- Begin this section with the heading "## Claude's Perspective"
+- Add the disclaimer immediately after: "_Note: These observations are verbatim as generated and were not edited by a human._"
+- What patterns or approaches you observed from the code
+- Technical decisions that were made and why (based on code analysis)
+- Interesting technical challenges or solutions
+- What the code artifacts reveal about the work
+- Limitations of what you can know from artifacts alone
+- Hypotheses about the development process (clearly marked as speculation)
+
+**Remember:** Write this section BEFORE seeing Alex's reflections to maintain independence.
+
+### Footer
+End with a horizontal rule (---) and a brief italicized note about the build process, e.g.:
+_Built with Claude Code in an evening of tinkering_
+
+## 6. Create Pull Request
+- Stage and commit the new blog post file
+- Push the branch to origin
+- Use `gh pr create` to open a PR with:
+  - Title: "Blog post: [post title]"
+  - Body summarizing the post and asking for review
+  - Label: `blog-post`
+
+## 7. Report Back
+Provide:
+- Link to the PR
+- Summary of what was captured in the post
+- Reminder that Alex should review the Reflections section and remove `draft: true` before merging
+
+**Note:** This creates a DRAFT post. The date is set to 9:00 AM Pacific to avoid Hugo's future date filtering. Alex will review, finalize his reflections, and remove `draft: true` before merging to publish.
+
+---
+
+I opened a PR to `entire` tonight - what a world!  I remember not all that long ago working for hours/weeks/months to contribute to the devtools/debugger of Mozilla Firefox.  Now I'm proposing a PR in just a few hours.  The world of coding with AI is definitely VERY different.  It's both exciting and scary.  I'm looking forward to seeing if this gets reviewed and any feedback will be really helpful!  I'm also planning to test out my `ralph-docker` flow tomorrow on the original repository to see if the same PR is proposed.
+
+---
+
+if I change the repository at https://github.com/arosenfeld2003/arosenfeld2003.github.io to private, will it disrupt the deployment/publish process?
+
+---
+
+I'm not sure that's correct: GitHub Pages
+
+Note
+
+To publish a GitHub Pages site privately, you need to have an organization account. Additionally, your organization must use GitHub Enterprise Cloud.

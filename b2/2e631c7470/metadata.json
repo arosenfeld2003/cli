@@ -1,0 +1,33 @@
+{
+  "cli_version": "dev",
+  "checkpoint_id": "b22e631c7470",
+  "strategy": "manual-commit",
+  "branch": "ralph/workspace-clean",
+  "commit_tree_hash": "8e9a07b884bd0e7087d73a0e0685341fa5341952",
+  "checkpoints_count": 0,
+  "files_touched": [
+    "cmd/entire/cli/checkpoint/checkpoint.go",
+    "cmd/entire/cli/checkpoint/checkpoint_test.go",
+    "cmd/entire/cli/checkpoint/committed.go",
+    "cmd/entire/cli/strategy/auto_commit.go",
+    "cmd/entire/cli/strategy/common.go",
+    "cmd/entire/cli/strategy/manual_commit_condensation.go",
+    "cmd/entire/cli/strategy/manual_commit_test.go"
+  ],
+  "sessions": [
+    {
+      "metadata": "/b2/2e631c7470/0/metadata.json",
+      "transcript": "/b2/2e631c7470/0/full.jsonl",
+      "context": "/b2/2e631c7470/0/context.md",
+      "content_hash": "/b2/2e631c7470/0/content_hash.txt",
+      "prompt": "/b2/2e631c7470/0/prompt.txt"
+    }
+  ],
+  "token_usage": {
+    "input_tokens": 82,
+    "cache_creation_tokens": 311112,
+    "cache_read_tokens": 8030521,
+    "output_tokens": 2137,
+    "api_call_count": 55
+  }
+}
