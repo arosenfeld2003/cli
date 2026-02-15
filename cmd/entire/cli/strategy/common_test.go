@@ -13,6 +13,10 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
+const testTranscriptPromptResponse = `{"type":"human","message":{"content":"test prompt"}}
+{"type":"assistant","message":{"content":"test response"}}
+`
+
 func TestOpenRepository(t *testing.T) {
 	// Create a temporary directory for the test repository
 	tmpDir := t.TempDir()

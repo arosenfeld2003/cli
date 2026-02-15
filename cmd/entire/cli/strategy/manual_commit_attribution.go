@@ -170,58 +170,25 @@ func countLinesStr(content string) int {
 	return lines
 }
 
-// CalculateAttributionWithAccumulated computes final attribution using accumulated prompt data.
-// This provides more accurate attribution than tree-only comparison because it captures
-// user edits that happened between checkpoints (which would otherwise be mixed into the
-// checkpoint snapshots).
-//
-// The calculation:
-// 1. Sum user edits from PromptAttributions (captured at each prompt start)
-// 2. Add user edits after the final checkpoint (shadow → head diff)
-// 3. Calculate agent lines from base → shadow
-// 4. Estimate user self-modifications vs agent modifications using per-file tracking
-// 5. Compute percentages
-//
-// Note: Binary files (detected by null bytes) are silently excluded from attribution
-// calculations since line-based diffing only applies to text files.
-//
-// See docs/architecture/attribution.md for details on the per-file tracking approach.
-func CalculateAttributionWithAccumulated(
-	baseTree *object.Tree,
-	shadowTree *object.Tree,
-	headTree *object.Tree,
+// agentFileAttribution holds the results of calculating attribution for agent-touched files.
+type agentFileAttribution struct {
+	totalAgentAndUserWork            int
+	postCheckpointUserAdded          int
+	postCheckpointUserRemoved        int
+	postCheckpointUserRemovedPerFile map[string]int
+}
+
+// calculateAgentFileAttribution computes line-level diffs for files the agent touched.
+// It calculates total work in shadow (base to shadow) and post-checkpoint user edits
+// (shadow to head). Binary files are tracked but excluded from line-based attribution.
+func calculateAgentFileAttribution(
+	baseTree, shadowTree, headTree *object.Tree,
 	filesTouched []string,
-	promptAttributions []PromptAttribution,
-) *checkpoint.InitialAttribution {
-	if len(filesTouched) == 0 {
-		return nil
+	binaryFilesInBase, binaryFilesInHead map[string]bool,
+) agentFileAttribution {
+	result := agentFileAttribution{
+		postCheckpointUserRemovedPerFile: make(map[string]int),
 	}
-
-	// Initialize binary file counters
-	var binaryFilesAdded, binaryFilesRemoved int
-	binaryFilesInBase := make(map[string]bool)
-	binaryFilesInHead := make(map[string]bool)
-
-	// Sum accumulated user lines from prompt attributions
-	// Also aggregate per-file user additions for accurate modification tracking
-	var accumulatedUserAdded, accumulatedUserRemoved int
-	accumulatedUserAddedPerFile := make(map[string]int)
-	for _, pa := range promptAttributions {
-		accumulatedUserAdded += pa.UserLinesAdded
-		accumulatedUserRemoved += pa.UserLinesRemoved
-		// Merge per-file data from all prompt attributions
-		for filePath, added := range pa.UserAddedPerFile {
-			accumulatedUserAddedPerFile[filePath] += added
-		}
-	}
-
-	// Calculate attribution for agent-touched files
-	// IMPORTANT: shadowTree is a snapshot of the worktree at checkpoint time,
-	// which includes both agent work AND accumulated user edits (to agent-touched files).
-	// So base→shadow diff = (agent work + accumulated user work to these files).
-	var totalAgentAndUserWork int
-	var postCheckpointUserAdded, postCheckpointUserRemoved int
-	postCheckpointUserRemovedPerFile := make(map[string]int)
 
 	for _, filePath := range filesTouched {
 		// Check if file is binary in each tree
@@ -246,23 +213,32 @@ func CalculateAttributionWithAccumulated(
 		shadowContent := getFileContent(shadowTree, filePath)
 		headContent := getFileContent(headTree, filePath)
 
-		// Total work in shadow: base → shadow (agent + accumulated user work for this file)
+		// Total work in shadow: base -> shadow (agent + accumulated user work for this file)
 		_, workAdded, _ := diffLines(baseContent, shadowContent)
-		totalAgentAndUserWork += workAdded
+		result.totalAgentAndUserWork += workAdded
 
-		// Post-checkpoint user edits: shadow → head (only post-checkpoint edits for this file)
+		// Post-checkpoint user edits: shadow -> head (only post-checkpoint edits for this file)
 		_, postUserAdded, postUserRemoved := diffLines(shadowContent, headContent)
-		postCheckpointUserAdded += postUserAdded
-		postCheckpointUserRemoved += postUserRemoved
+		result.postCheckpointUserAdded += postUserAdded
+		result.postCheckpointUserRemoved += postUserRemoved
 
 		// Track per-file removals for self-modification estimation
 		if postUserRemoved > 0 {
-			postCheckpointUserRemovedPerFile[filePath] = postUserRemoved
+			result.postCheckpointUserRemovedPerFile[filePath] = postUserRemoved
 		}
 	}
 
-	// Calculate total user edits to non-agent files (files not in filesTouched)
-	// These files are not in the shadow tree, so base→head captures ALL their user edits
+	return result
+}
+
+// calculateNonAgentFileEdits calculates total user edits to files not touched by the agent.
+// These files are not in the shadow tree, so base to head captures all their user edits.
+// Binary files are tracked but excluded from line-based attribution.
+func calculateNonAgentFileEdits(
+	baseTree, headTree *object.Tree,
+	filesTouched []string,
+	binaryFilesInBase, binaryFilesInHead map[string]bool,
+) int {
 	nonAgentFiles := getAllChangedFilesBetweenTrees(baseTree, headTree)
 	var allUserEditsToNonAgentFiles int
 	for _, filePath := range nonAgentFiles {
@@ -293,10 +269,15 @@ func CalculateAttributionWithAccumulated(
 		allUserEditsToNonAgentFiles += userAdded
 	}
 
-	// Separate accumulated edits by file type using per-file tracking data.
-	// This is precise because accumulatedUserAddedPerFile tells us exactly which files
-	// the user edited between checkpoints.
-	var accumulatedToAgentFiles, accumulatedToNonAgentFiles int
+	return allUserEditsToNonAgentFiles
+}
+
+// separateAccumulatedEdits splits accumulated user edits into those targeting agent-touched
+// files and those targeting non-agent files, using per-file tracking data.
+func separateAccumulatedEdits(
+	accumulatedUserAddedPerFile map[string]int,
+	filesTouched []string,
+) (accumulatedToAgentFiles, accumulatedToNonAgentFiles int) {
 	for filePath, added := range accumulatedUserAddedPerFile {
 		if slices.Contains(filesTouched, filePath) {
 			accumulatedToAgentFiles += added
@@ -304,16 +285,117 @@ func CalculateAttributionWithAccumulated(
 			accumulatedToNonAgentFiles += added
 		}
 	}
+	return accumulatedToAgentFiles, accumulatedToNonAgentFiles
+}
+
+// calculateBinaryFileStats computes counts of binary files added, removed, and changed
+// between the base and head trees.
+func calculateBinaryFileStats(
+	baseTree, headTree *object.Tree,
+	binaryFilesInBase, binaryFilesInHead map[string]bool,
+) (changed, added, removed int) {
+	for filePath := range binaryFilesInHead {
+		if !binaryFilesInBase[filePath] {
+			added++
+		}
+	}
+	for filePath := range binaryFilesInBase {
+		if !binaryFilesInHead[filePath] {
+			removed++
+		}
+	}
+	changed = added + removed
+
+	// Count binary files that were modified (exist in both but potentially different)
+	for filePath := range binaryFilesInBase {
+		if binaryFilesInHead[filePath] {
+			// File exists in both trees, check if it's actually different
+			baseFile, err := baseTree.File(filePath)
+			if err != nil {
+				continue
+			}
+			headFile, err := headTree.File(filePath)
+			if err != nil {
+				continue
+			}
+			if baseFile != nil && headFile != nil && baseFile.Hash != headFile.Hash {
+				changed++
+			}
+		}
+	}
+
+	return changed, added, removed
+}
+
+// CalculateAttributionWithAccumulated computes final attribution using accumulated prompt data.
+// This provides more accurate attribution than tree-only comparison because it captures
+// user edits that happened between checkpoints (which would otherwise be mixed into the
+// checkpoint snapshots).
+//
+// The calculation:
+// 1. Sum user edits from PromptAttributions (captured at each prompt start)
+// 2. Add user edits after the final checkpoint (shadow → head diff)
+// 3. Calculate agent lines from base → shadow
+// 4. Estimate user self-modifications vs agent modifications using per-file tracking
+// 5. Compute percentages
+//
+// Note: Binary files (detected by null bytes) are silently excluded from attribution
+// calculations since line-based diffing only applies to text files.
+//
+// See docs/architecture/attribution.md for details on the per-file tracking approach.
+func CalculateAttributionWithAccumulated(
+	baseTree *object.Tree,
+	shadowTree *object.Tree,
+	headTree *object.Tree,
+	filesTouched []string,
+	promptAttributions []PromptAttribution,
+) *checkpoint.InitialAttribution {
+	if len(filesTouched) == 0 {
+		return nil
+	}
+
+	binaryFilesInBase := make(map[string]bool)
+	binaryFilesInHead := make(map[string]bool)
+
+	// Sum accumulated user lines from prompt attributions
+	// Also aggregate per-file user additions for accurate modification tracking
+	var accumulatedUserAdded, accumulatedUserRemoved int
+	accumulatedUserAddedPerFile := make(map[string]int)
+	for _, pa := range promptAttributions {
+		accumulatedUserAdded += pa.UserLinesAdded
+		accumulatedUserRemoved += pa.UserLinesRemoved
+		// Merge per-file data from all prompt attributions
+		for filePath, added := range pa.UserAddedPerFile {
+			accumulatedUserAddedPerFile[filePath] += added
+		}
+	}
+
+	// Calculate attribution for agent-touched files
+	agentAttr := calculateAgentFileAttribution(
+		baseTree, shadowTree, headTree, filesTouched,
+		binaryFilesInBase, binaryFilesInHead,
+	)
+
+	// Calculate total user edits to non-agent files
+	allUserEditsToNonAgentFiles := calculateNonAgentFileEdits(
+		baseTree, headTree, filesTouched,
+		binaryFilesInBase, binaryFilesInHead,
+	)
+
+	// Separate accumulated edits by file type
+	accumulatedToAgentFiles, accumulatedToNonAgentFiles := separateAccumulatedEdits(
+		accumulatedUserAddedPerFile, filesTouched,
+	)
 
 	// Agent work = (base→shadow for agent files) - (accumulated user edits to agent files only)
-	totalAgentAdded := max(0, totalAgentAndUserWork-accumulatedToAgentFiles)
+	totalAgentAdded := max(0, agentAttr.totalAgentAndUserWork-accumulatedToAgentFiles)
 
 	// Post-checkpoint edits to non-agent files = total edits - accumulated portion (never negative)
 	postToNonAgentFiles := max(0, allUserEditsToNonAgentFiles-accumulatedToNonAgentFiles)
 
 	// Total user contribution = accumulated (all files) + post-checkpoint (agent files) + post-checkpoint (non-agent files)
-	totalUserAdded := accumulatedUserAdded + postCheckpointUserAdded + postToNonAgentFiles
-	totalUserRemoved := accumulatedUserRemoved + postCheckpointUserRemoved
+	totalUserAdded := accumulatedUserAdded + agentAttr.postCheckpointUserAdded + postToNonAgentFiles
+	totalUserRemoved := accumulatedUserRemoved + agentAttr.postCheckpointUserRemoved
 
 	// Estimate modified lines (user changed existing lines)
 	// Lines that were both added and removed are treated as modifications.
@@ -322,7 +404,7 @@ func CalculateAttributionWithAccumulated(
 	// Estimate user self-modifications using per-file tracking (see docs/architecture/attribution.md)
 	// When a user removes lines from a file, assume they're removing their own lines first (LIFO).
 	// Only after exhausting their own additions should we count removals as targeting agent lines.
-	userSelfModified := estimateUserSelfModifications(accumulatedUserAddedPerFile, postCheckpointUserRemovedPerFile)
+	userSelfModified := estimateUserSelfModifications(accumulatedUserAddedPerFile, agentAttr.postCheckpointUserRemovedPerFile)
 
 	// humanModifiedAgent = modifications that targeted agent lines (not user's own lines)
 	humanModifiedAgent := max(0, totalHumanModified-userSelfModified)
@@ -359,35 +441,9 @@ func CalculateAttributionWithAccumulated(
 	}
 
 	// Calculate binary file statistics
-	for filePath := range binaryFilesInHead {
-		if !binaryFilesInBase[filePath] {
-			binaryFilesAdded++
-		}
-	}
-	for filePath := range binaryFilesInBase {
-		if !binaryFilesInHead[filePath] {
-			binaryFilesRemoved++
-		}
-	}
-	binaryFilesChanged := binaryFilesAdded + binaryFilesRemoved
-
-	// Count binary files that were modified (exist in both but potentially different)
-	for filePath := range binaryFilesInBase {
-		if binaryFilesInHead[filePath] {
-			// File exists in both trees, check if it's actually different
-			baseFile, err := baseTree.File(filePath)
-			if err != nil {
-				continue
-			}
-			headFile, err := headTree.File(filePath)
-			if err != nil {
-				continue
-			}
-			if baseFile != nil && headFile != nil && baseFile.Hash != headFile.Hash {
-				binaryFilesChanged++
-			}
-		}
-	}
+	binaryFilesChanged, binaryFilesAdded, binaryFilesRemoved := calculateBinaryFileStats(
+		baseTree, headTree, binaryFilesInBase, binaryFilesInHead,
+	)
 
 	return &checkpoint.InitialAttribution{
 		CalculatedAt:       time.Now().UTC(),
