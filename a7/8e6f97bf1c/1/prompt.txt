@@ -1,0 +1,99 @@
+Implement the following plan:
+
+# Cherry-Pick Content Hash Changes onto Fresh Branch
+
+## Context
+
+Ralph's overnight session implemented content hash functionality for rebase-resilient checkpoint deduplication. The work lives on the `stash` branch (based on older main) interleaved with unrelated Gemini/summarize changes. Current main already has `CommitTreeHash`, `GetHeadTreeHash()`, and `ReadAgentTypeFromTree()` — so we only need the `CommitContentHash` additions.
+
+The untracked `contenthash/` package (958 lines) already exists in the working tree.
+
+## Plan
+
+### Step 1: Create fresh branch from main
+```
+git checkout -b feature/content-hash-integration main
+```
+
+### Step 2: Add `CommitContentHash` field to checkpoint structs
+**File:** `cmd/entire/cli/checkpoint/checkpoint.go`
+
+Add `CommitContentHash string` to these 5 structs:
+- `WriteTemporaryOptions` (after `IsFirstCheckpoint`, ~line 155)
+- `WriteCommittedOptions` (after `CommitTreeHash`, ~line 210)
+- `CommittedMetadata` (after `CommitTreeHash`, ~line 346)
+- `CheckpointSummary` (after `CommitTreeHash`, ~line 425)
+- `WriteTemporaryTaskOptions` (after `IncrementalData`, ~line 556)
+
+### Step 3: Pass `CommitContentHash` through storage layer
+**File:** `cmd/entire/cli/checkpoint/committed.go`
+
+- `writeSessionToSubdirectory()` (~line 336): Add `CommitContentHash: opts.CommitContentHash` to CommittedMetadata literal
+- `writeCheckpointSummary()` (~line 384): Add `CommitContentHash: opts.CommitContentHash` to CheckpointSummary literal
+
+### Step 4: Compute and pass content hash in auto-commit strategy
+**File:** `cmd/entire/cli/strategy/auto_commit.go`
+
+- Add imports: `contenthash` package + `cli` package (for FileChanges)
+- `commitMetadataToMetadataBranch()` (~line 248): Compute content hash from ctx.ModifiedFiles/NewFiles/DeletedFiles, pass as `CommitContentHash` in WriteCommittedOptions
+- `SaveTaskCheckpoint()` (~line 507): Compute content hash, pass to both `commitTaskCodeToActive()` and `commitTaskMetadataToMetadataBranch()`
+- Update signatures of `commitTaskCodeToActive()` and `commitTaskMetadataToMetadataBranch()` to accept `contentHash string` parameter
+
+### Step 5: Compute and pass content hash in manual-commit strategy
+**File:** `cmd/entire/cli/strategy/manual_commit_git.go`
+
+- Add imports: `contenthash` package + `cli` package
+- `SaveChanges()` (~line 79): Compute content hash, pass as `CommitContentHash` in WriteTemporaryOptions
+- `SaveTaskCheckpoint()` (~line 225): Compute content hash, pass as `CommitContentHash` in WriteTemporaryTaskOptions
+
+### Step 6: Add contenthash package
+```
+git add cmd/entire/cli/contenthash/
+```
+Fix lint issues before committing:
+- Rename `new` parameter to `added` in `aggregate.go` (shadows builtin)
+- Add `//nolint:gosec` to `os.Open` calls in `contenthash.go` (G304 — paths are from git status, not user input)
+- Fix `assert.Error` → `require.Error` in tests (testifylint)
+- Fix or remove `HashFileWithMetadata` unused error return (unparam)
+- Fix test expectation in `integration_test.go` for non-existent files (code skips them, test expects error)
+
+### Step 7: Add integration test
+```
+git add cmd/entire/cli/integration_test/content_hash_stability_test.go
+```
+
+### Step 8: Track with Entire
+Ensure `entire` is enabled for this session so all checkpoint changes are tracked:
+```
+entire enable   # if not already enabled
+entire start    # start session tracking
+```
+
+### Step 9: Verify
+```
+mise run fmt && mise run lint && mise run test:ci
+```
+
+## Files Modified
+- `cmd/entire/cli/checkpoint/checkpoint.go` — Add CommitContentHash to 5 structs
+- `cmd/entire/cli/checkpoint/committed.go` — Pass CommitContentHash through
+- `cmd/entire/cli/strategy/auto_commit.go` — Compute + pass content hash
+- `cmd/entire/cli/strategy/manual_commit_git.go` — Compute + pass content hash
+
+## Files Added
+- `cmd/entire/cli/contenthash/` (6 files, ~958 lines) — with lint fixes
+- `cmd/entire/cli/integration_test/content_hash_stability_test.go` (221 lines)
+
+## NOT included (from stash branch)
+- Gemini hook/transcript changes
+- Summarize agentType parameter change
+- Explain command changes
+- CHANGELOG updates
+- GetHeadTreeHash / ReadAgentTypeFromTree (already on main)
+
+
+If you need specific details from before exiting plan mode (like exact code snippets, error messages, or content you generated), read the full transcript at: /Users/alexrosenfeld/.REDACTED.jsonl
+
+---
+
+commit this

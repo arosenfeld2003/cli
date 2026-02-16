@@ -1,10 +1,12 @@
 {
   "cli_version": "dev",
   "checkpoint_id": "a78e6f97bf1c",
+  "session_id": "52f73254-7b7a-4a7a-ab26-7e6c17199dd2",
   "strategy": "manual-commit",
+  "created_at": "2026-02-16T23:00:06.660504Z",
   "branch": "feature/content-hash-integration",
   "commit_tree_hash": "aaf4a5252446be6c57b875666e95400e77d7c37c",
-  "checkpoints_count": 2,
+  "checkpoints_count": 1,
   "files_touched": [
     "AGENTS.md",
     "ANALYSIS_SUMMARY.md",
@@ -56,27 +58,22 @@
     "specs/tree-hash-cli-interface.md",
     "specs/verify.md"
   ],
-  "sessions": [
-    {
-      "metadata": "/a7/8e6f97bf1c/0/metadata.json",
-      "transcript": "/a7/8e6f97bf1c/0/full.jsonl",
-      "context": "/a7/8e6f97bf1c/0/context.md",
-      "content_hash": "/a7/8e6f97bf1c/0/content_hash.txt",
-      "prompt": "/a7/8e6f97bf1c/0/prompt.txt"
-    },
-    {
-      "metadata": "/a7/8e6f97bf1c/1/metadata.json",
-      "transcript": "/a7/8e6f97bf1c/1/full.jsonl",
-      "context": "/a7/8e6f97bf1c/1/context.md",
-      "content_hash": "/a7/8e6f97bf1c/1/content_hash.txt",
-      "prompt": "/a7/8e6f97bf1c/1/prompt.txt"
-    }
-  ],
+  "agent": "Claude Code",
   "token_usage": {
-    "input_tokens": 1250,
-    "cache_creation_tokens": 304089,
-    "cache_read_tokens": 17236438,
-    "output_tokens": 4218,
-    "api_call_count": 181
-  }
+    "input_tokens": 113,
+    "cache_creation_tokens": 124242,
+    "cache_read_tokens": 12282103,
+    "output_tokens": 3100,
+    "api_call_count": 109
+  },
+  "initial_attribution": {
+    "calculated_at": "2026-02-16T23:00:06.329816Z",
+    "agent_lines": 1282,
+    "human_added": 0,
+    "human_modified": 0,
+    "human_removed": 12966,
+    "total_committed": 1282,
+    "agent_percentage": 100
+  },
+  "transcript_path": ".claude/projects/-Users-alexrosenfeld-repos-cli/52f73254-7b7a-4a7a-ab26-7e6c17199dd2.jsonl"
 }
